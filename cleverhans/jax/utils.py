@@ -29,6 +29,8 @@ def clip_eta(eta, norm, eps):
     if norm == np.inf:
         eta = np.clip(eta, a_min=-eps, a_max=eps)
     elif norm == 2:
+        if not isinstance(eps, float):
+            raise NotImplementedError("Ellipsoid clipping L_2 norm has not been implemented yet.")
         # avoid_zero_div must go inside sqrt to avoid a divide by zero in the gradient through this operation
         norm = np.sqrt(
             np.maximum(avoid_zero_div, np.sum(np.square(eta), axis=axis, keepdims=True))

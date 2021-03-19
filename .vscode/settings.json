@@ -1,0 +1,4 @@
+{
+    "python.pythonPath": "/home/julian/anaconda3/envs/synsense/bin/python",
+    "python.linting.pylintEnabled": true
+}

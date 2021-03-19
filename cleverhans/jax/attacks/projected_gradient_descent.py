@@ -3,6 +3,8 @@ import jax.numpy as np
 from cleverhans.jax.attacks.fast_gradient_method import fast_gradient_method
 from cleverhans.jax.utils import clip_eta, one_hot
 
+import numpy as onp
+from scipy.optimize import minimize
 
 def projected_gradient_descent(
     model_fn,
@@ -42,8 +44,9 @@ def projected_gradient_descent(
               Targeted will instead try to move in the direction of being more like y.
     :return: a tensor for the adversarial example
     """
-
-    assert eps_iter <= eps, (eps_iter, eps)
+    BALL = isinstance(eps,float) 
+    assert (BALL or eps.shape == x.shape), "Eps must define an epsilon ball or an ellipsoid"
+    assert (not BALL) or np.array(eps_iter <= eps).all(), (eps_iter, eps)
     if norm == 1:
         raise NotImplementedError(
             "It's not clear that FGM is a good inner loop"
@@ -59,11 +62,10 @@ def projected_gradient_descent(
     if rand_init:
         rand_minmax = eps
         eta = np.random.uniform(x.shape, -rand_minmax, rand_minmax)
+        eta = clip_eta(eta, norm, eps)
     else:
         eta = np.zeros_like(x)
 
-    # Clip eta
-    eta = clip_eta(eta, norm, eps)
     adv_x = x + eta
     if clip_min is not None or clip_max is not None:
         adv_x = np.clip(adv_x, a_min=clip_min, a_max=clip_max)
@@ -84,6 +86,40 @@ def projected_gradient_descent(
             y=y,
             targeted=targeted,
         )
+
+        if not isinstance(eps, float) and (norm == 2):
+            raise NotImplementedError
+            # Projection onto the ellipsoid in l2
+            """
+            perturbation = Proj(x + grads) - x
+            Optimization problem: x_{proj}* = arg min_{x_proj} .5 * ||x_{proj}-y||_2^2 s.t. (x_{proj}-c)' W (x_{proj}-c) <= 1 
+            """
+            adv_x *= eps_iter
+            x_ = x.ravel()
+            y_ = adv_x.ravel() # We want to project y back on the ellipsoid defined by eps
+            w_ = 1 / (eps.ravel() ** 2 + 1e-12) # Squared inverse of the diagonal matrix W that transforms the ball into an axis-aligned ellipsoid
+            def f_and_g(x_p):
+                g_ = x_p - y_
+                f_ = .5 * np.linalg.norm(g_, ord=2) ** 2
+                return f_, g_
+            def functionValIneq(x_p):
+                t0 = x_p - x_
+                return np.dot(t0, w_ * t0)
+            def gradientIneq(x_p):
+                t0 = x_p - x_
+                return 2*(w_*t0)
+
+            x0 = onp.random.randn(x_.shape[0])
+            bnds = [(-np.inf,np.inf)] * x_.shape[0]
+            constraints = ({'type' : 'ineq',
+                        'fun' : lambda x: -functionValIneq(x),
+                        'jac' : lambda x: -gradientIneq(x)})
+            result = minimize(f_and_g, x0, jac=True, method='SLSQP',
+                            bounds=bnds,
+                            constraints=constraints)
+            x_p = result.x
+            print("\nFunction value ineq.:",functionValIneq(x_p))
+            adv_x = np.reshape(x_p, x.shape)
 
         # Clipping perturbation eta to norm norm ball
         eta = adv_x - x

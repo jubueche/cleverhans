@@ -4,7 +4,6 @@ from jax.experimental.stax import logsoftmax
 
 from cleverhans.jax.utils import one_hot
 
-
 def fast_gradient_method(
     model_fn, x, eps, norm, clip_min=None, clip_max=None, y=None, targeted=False
 ):
