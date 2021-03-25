@@ -4,6 +4,7 @@ import datasets
 import itertools
 import time
 import jax.numpy as np
+import numpy as onp
 import numpy.random as npr
 from jax import jit, grad, random
 from jax.experimental import optimizers
@@ -141,27 +142,51 @@ def main(_):
     idx = 0
     plt.figure(figsize=(15,6),constrained_layout=True)
     
-    # zeta, alpha = gen_ellipsoid(X=test_images[idx].reshape((1,28,28,1)), zeta_rel=FLAGS.zeta_rel, zeta_const=FLAGS.zeta_const, alpha=None, N_steps=40)
-    zeta, alpha = gen_ellipsoid_match_volume(X=test_images[idx].reshape((1,28,28,1)), zeta_const=FLAGS.zeta_const, eps=FLAGS.eps, alpha=None, N_steps=40)
+    zeta, alpha = gen_ellipsoid(X=test_images[idx].reshape((1,28,28,1)), zeta_rel=FLAGS.zeta_rel, zeta_const=FLAGS.zeta_const, alpha=None, N_steps=40)
+    # zeta, alpha = gen_ellipsoid_match_volume(X=test_images[idx].reshape((1,28,28,1)), zeta_const=FLAGS.zeta_const, eps=FLAGS.eps, alpha=None, N_steps=40)
     test_images_pgd_ellipsoid = projected_gradient_descent(model_fn, test_images[idx].reshape((1,28,28,1)), zeta, alpha, 40, np.inf)
+    predict_pgd_ellipsoid = np.argmax(predict(params, test_images_pgd_ellipsoid), axis=1)
 
     test_images_fgm = fast_gradient_method(model_fn, test_images[idx].reshape((1,28,28,1)), FLAGS.eps, np.inf)
-    
-    test_images_pgd = projected_gradient_descent(model_fn, test_images[idx].reshape((1,28,28,1)), FLAGS.eps, 0.01, 40, np.inf)
+    predict_fgm = np.argmax(predict(params, test_images_fgm), axis=1)
 
-    plt.subplot(141)
+    test_images_pgd = projected_gradient_descent(model_fn, test_images[idx].reshape((1,28,28,1)), FLAGS.eps, 0.01, 40, np.inf)
+    predict_pgd = np.argmax(predict(params, test_images_pgd), axis=1)
+    
+    base = 100
+    f_ = lambda x : np.log(x) / np.log(base)
+    a = base - 1
+    transform = 1+a*test_images[idx].reshape((1,28,28,1)) # [1,base]
+    
+    # test_images_pgd_transform = projected_gradient_descent(model_fn, f_(np.where(transform > base,base,transform)), FLAGS.zeta_rel, 0.01, 40, np.inf)
+    test_images_pgd_transform = projected_gradient_descent(model_fn, f_(np.where(transform > base,base,transform)), 1.8, 0.01, 40, 2)
+    test_images_pgd_transform = np.clip(test_images_pgd_transform, 0.0, 1.0)
+    test_images_pgd_transform = (base**test_images_pgd_transform - 1) / a
+    predict_transform = np.argmax(predict(params, test_images_pgd_transform), axis=1)
+
+    plt.subplot(151)
     plt.imshow(np.squeeze(test_images[idx]),cmap='gray')
     plt.title("Original")
-    plt.subplot(142)
+    plt.subplot(152)
     plt.imshow(np.squeeze(test_images_fgm),cmap='gray')
-    plt.title("FGM")
-    plt.subplot(143)
+    plt.title(f"FGM Pred: {predict_fgm}")
+    plt.subplot(153)
     plt.imshow(np.squeeze(test_images_pgd),cmap='gray')
-    plt.title("PGD")
-    plt.subplot(144)
+    plt.title(f"PGD {predict_pgd}")
+    plt.subplot(154)
     plt.imshow(np.squeeze(test_images_pgd_ellipsoid),cmap='gray')
-    plt.title("PGD Ellipsoid")
+    plt.title(f"PGD Ellipsoid L-Inf Pred: {predict_pgd_ellipsoid}")
+    plt.subplot(155)
+    plt.imshow(np.squeeze(test_images_pgd_transform),cmap='gray')
+    plt.title(f"PGD log{base} L2 Pred: {predict_transform}")
+    
     plt.show()
+
+    transform = 1+a*test_images
+    test_images_pgd_transform = projected_gradient_descent(model_fn, f_(np.where(transform > base,base,transform)), FLAGS.zeta_rel, 0.01, 40, np.inf)
+    test_images_pgd_transform = np.clip(test_images_pgd_transform, 0.0, 1.0)
+    test_images_pgd_transform = (base**test_images_pgd_transform - 1) / a
+    test_acc_pgd_transform = accuracy(params, (test_images_pgd_transform, test_labels))
 
     # Generate whole attacking test images
     # zeta, alpha = gen_ellipsoid(X=test_images, zeta_rel=FLAGS.zeta_rel, zeta_const=FLAGS.zeta_const, alpha=None, N_steps=40)
@@ -183,12 +208,13 @@ def main(_):
     print("Test set accuracy on FGM adversarial examples: {}".format(test_acc_fgm))
     print("Test set accuracy on PGD adversarial examples: {}".format(test_acc_pgd))
     print("Test set accuracy on PGD Ellipsoid adversarial examples: {}".format(test_acc_pgd_ellipsoid))
+    print("Test set accuracy on PGD Ellipsoid via transform adversarial examples: {}".format(test_acc_pgd_transform))
 
 
 if __name__ == "__main__":
     flags.DEFINE_integer("nb_epochs", 8, "Number of epochs.")
-    flags.DEFINE_float("eps", 0.035, "Total epsilon for FGM and PGD attacks.")
+    flags.DEFINE_float("eps", 0.065, "Total epsilon for FGM and PGD attacks.")
     flags.DEFINE_float("zeta_const", 0.01, "Constant offset of ellipsoid.")
-    flags.DEFINE_float("zeta_rel", 0.25, "Relative offset of ellipsoid.")
+    flags.DEFINE_float("zeta_rel", 0.35, "Relative offset of ellipsoid.")
 
     app.run(main)
