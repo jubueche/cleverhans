@@ -147,10 +147,10 @@ def main(_):
     test_images_pgd_ellipsoid = projected_gradient_descent(model_fn, test_images[idx].reshape((1,28,28,1)), zeta, alpha, 40, np.inf)
     predict_pgd_ellipsoid = np.argmax(predict(params, test_images_pgd_ellipsoid), axis=1)
 
-    test_images_fgm = fast_gradient_method(model_fn, test_images[idx].reshape((1,28,28,1)), FLAGS.eps, np.inf)
+    test_images_fgm = fast_gradient_method(model_fn, test_images[idx].reshape((1,28,28,1)), 0.075, np.inf)
     predict_fgm = np.argmax(predict(params, test_images_fgm), axis=1)
 
-    test_images_pgd = projected_gradient_descent(model_fn, test_images[idx].reshape((1,28,28,1)), FLAGS.eps, 0.01, 40, np.inf)
+    test_images_pgd = projected_gradient_descent(model_fn, test_images[idx].reshape((1,28,28,1)), FLAGS.eps, 0.01, 40, 2)
     predict_pgd = np.argmax(predict(params, test_images_pgd), axis=1)
     
     base = 100
@@ -169,10 +169,10 @@ def main(_):
     plt.title("Original")
     plt.subplot(152)
     plt.imshow(np.squeeze(test_images_fgm),cmap='gray')
-    plt.title(f"FGM Pred: {predict_fgm}")
+    plt.title(f"FGM L-Inf Pred: {predict_fgm}")
     plt.subplot(153)
     plt.imshow(np.squeeze(test_images_pgd),cmap='gray')
-    plt.title(f"PGD {predict_pgd}")
+    plt.title(f"PGD L2 {predict_pgd}")
     plt.subplot(154)
     plt.imshow(np.squeeze(test_images_pgd_ellipsoid),cmap='gray')
     plt.title(f"PGD Ellipsoid L-Inf Pred: {predict_pgd_ellipsoid}")
@@ -213,7 +213,7 @@ def main(_):
 
 if __name__ == "__main__":
     flags.DEFINE_integer("nb_epochs", 8, "Number of epochs.")
-    flags.DEFINE_float("eps", 0.065, "Total epsilon for FGM and PGD attacks.")
+    flags.DEFINE_float("eps", 1.0, "Total epsilon for FGM and PGD attacks.")
     flags.DEFINE_float("zeta_const", 0.01, "Constant offset of ellipsoid.")
     flags.DEFINE_float("zeta_rel", 0.35, "Relative offset of ellipsoid.")
 
