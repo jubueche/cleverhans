@@ -93,3 +93,6 @@ ENV/
 
 # Mac related
 .DS_Store
+
+# Cached data & trained models
+data/

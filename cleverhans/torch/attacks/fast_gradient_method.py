@@ -36,6 +36,44 @@ def fast_gradient_method(
               memory or for unit tests that intentionally pass strange input)
     :return: a tensor for the adversarial example
     """
+    x_grad = _fast_gradient_method_grad(
+        model_fn=model_fn,
+        x=x,
+        eps=eps,
+        norm=norm,
+        clip_min=clip_min,
+        clip_max=clip_max,
+        y=y,
+        targeted=targeted,
+        sanity_checks=sanity_checks)
+    optimal_perturbation = optimize_linear(x_grad, eps, norm)
+
+    # Add perturbation to original example to obtain adversarial example
+    adv_x = x + optimal_perturbation
+
+    # If clipping is needed, reset all values outside of [clip_min, clip_max]
+    if (clip_min is not None) or (clip_max is not None):
+        if clip_min is None or clip_max is None:
+            raise ValueError(
+                "One of clip_min and clip_max is None but we don't currently support one-sided clipping"
+            )
+        adv_x = torch.clamp(adv_x, clip_min, clip_max)
+
+    return adv_x
+
+
+def _fast_gradient_method_grad(
+    model_fn,
+    x,
+    eps,
+    norm,
+    clip_min=None,
+    clip_max=None,
+    y=None,
+    targeted=False,
+    sanity_checks=False,
+    loss_fn=None,
+):
     if norm not in [np.inf, 1, 2]:
         raise ValueError(
             "Norm order must be either np.inf, 1, or 2, got {} instead.".format(norm)
@@ -77,27 +115,18 @@ def fast_gradient_method(
         _, y = torch.max(model_fn(x), 1)
 
     # Compute loss
-    loss_fn = torch.nn.CrossEntropyLoss()
-    loss = loss_fn(model_fn(x), y)
+    if loss_fn == None:
+        loss_fn = torch.nn.CrossEntropyLoss()
+    out = model_fn(x)
+    loss = loss_fn(out, y)
     # If attack is targeted, minimize loss of target label rather than maximize loss of correct label
     if targeted:
         loss = -loss
 
     # Define gradient of loss wrt input
     loss.backward()
-    optimal_perturbation = optimize_linear(x.grad, eps, norm)
-
-    # Add perturbation to original example to obtain adversarial example
-    adv_x = x + optimal_perturbation
-
-    # If clipping is needed, reset all values outside of [clip_min, clip_max]
-    if (clip_min is not None) or (clip_max is not None):
-        if clip_min is None or clip_max is None:
-            raise ValueError(
-                "One of clip_min and clip_max is None but we don't currently support one-sided clipping"
-            )
-        adv_x = torch.clamp(adv_x, clip_min, clip_max)
 
     if sanity_checks:
         assert np.all(asserts)
-    return adv_x
+
+    return x.grad
