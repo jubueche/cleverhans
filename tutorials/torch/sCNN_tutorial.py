@@ -207,21 +207,22 @@ dataset_test_spiketrains = SpikeTrainDataset(
     dt=1000)
 dataloader_test_spiketrains = DataLoader(dataset_test_spiketrains, shuffle=True, num_workers=4, batch_size=1)
 
-for data, target in dataloader_test_spiketrains:
+for idx, (data, target) in enumerate(dataloader_test_spiketrains):
     P0 = data
-    break
+    if idx == 2:
+        break
 
 P0 = P0[0].to(device)
-P0[P0 > 1] = 1.0
+P0 = torch.clamp(P0, 0.0, 1.0)
 model_pred = get_prediction(prob_net, P0)
 
 # Attack
 N_pgd = 30
-N_MC = 10
-eps = 0.05
-eps_iter = 0.01
-rand_minmax = 0.01
-norm = np.inf
+N_MC = 10 # 50 -> 0.42, 20 -> 0.356 , 1 -> 0.753, 10 -> 0.34
+eps = 6.5
+eps_iter = 0.1
+rand_minmax = 0.1
+norm = 2
 
 eta = torch.zeros_like(P0).uniform_(-rand_minmax, rand_minmax) # Calculate initial perturbation
 eta = clip_eta(eta, norm, eps) # Clip initial perturbation
@@ -229,7 +230,8 @@ P_adv = P0 + eta
 P_adv = torch.clamp(P_adv, 0.0, 1.0) # Clip for probabilities
 
 def loss_fn(spike_out, target):
-    outputs = torch.reshape(torch.max(spike_out,axis=0)[0], (1,10))
+    # outputs = torch.reshape(torch.max(spike_out,axis=0)[0], (1,10)) # TODO Try sum
+    outputs = torch.reshape(torch.sum(spike_out,axis=0), (1,10))
     target = torch.tensor([target])
     return F.cross_entropy(outputs, target)
 
@@ -261,31 +263,38 @@ for i in range(N_pgd):
     P_adv = P0 + eta
     P_adv = torch.clamp(P_adv, 0.0, 1.0)
 
-# Evaluate the network N_MC times
-print("Original prediction",get_prediction(prob_net, P0))
-for i in range(N_MC):
-    model_pred = get_prediction(prob_net, P_adv, "prob")
-    print("Trial",i,model_pred)
+# Evaluate the network X times
+print("Original prediction",float(get_prediction(prob_net, P0)))
+N_eval = 300
+correct = []
+for i in range(N_eval):
+    model_pred_tmp = get_prediction(prob_net, P_adv, "prob")
+    if model_pred_tmp == target:
+        correct.append(1.0)
+print("Evaluation accuracy",float(sum(correct)/N_eval))
 
 # # Evaluate the resulting data
 N_rows = N_cols = 4
 
 class Redraw(object):
-    def __init__(self, data, pred):
+    def __init__(self, data, pred, target):
         self.initialized = False
         self.data = data # [T,32,32]
         self.pred = pred
+        self.target = target
         self.f0 = 0
         self.max = self.data.size(0)
+        self.color = 'green'
+        if not self.pred == self.target:
+            self.color = 'red'
 
     def draw(self, f, ax):
         X = self.data[int(self.f0 % self.max)]
         if not self.initialized:
-            ax.set_title(f"Pred {str(float(self.pred))}")
-            ax.spines['left'].set_visible(False)
-            ax.spines['right'].set_visible(False)
-            ax.spines['top'].set_visible(False)
-            ax.spines['bottom'].set_visible(False)
+            ax.set_ylabel(f"Pred {str(float(self.pred))}")
+            for axis in ['top','bottom','left','right']:
+                ax.spines[axis].set_linewidth(2.5)
+                ax.spines[axis].set_color(self.color)    
             ax.set_yticks([])
             ax.set_xticks([])
             self.im = ax.imshow(self.data[0])
@@ -300,15 +309,17 @@ def redraw_fn(f, axes):
 
 data = []
 for i in range(N_rows * N_cols):
-    image = reparameterization_bernoulli(P_adv, temperature=prob_net.temperature)
+    image = torch.round(reparameterization_bernoulli(P_adv, temperature=prob_net.temperature))
     assert ((image >= 0.0) & (image <= 1.0)).all()
-    pred = get_prediction(prob_net, torch.round(image), "non_prob")
-    data.append((torch.sum(image, 1),pred))
+    pred = get_prediction(prob_net, image, "non_prob")
+    store_image = torch.clamp(torch.sum(image, 1), 0.0, 1.0)
+    assert ((store_image == 0.0) | (store_image == 1.0)).all()
+    data.append((store_image,pred))
 
-redraw_fn.sub = [Redraw(el[0],el[1]) for el in data]
+redraw_fn.sub = [Redraw(el[0],el[1],target) for el in data] + [Redraw(torch.clamp(torch.sum(P0,1),0.0,1.0),model_pred,target)]
 
 videofig(
     num_frames=100,
     play_fps=50,
     redraw_func=redraw_fn, 
-    grid_specs={'nrows': N_rows, 'ncols': N_cols})
+    grid_specs={'nrows': N_rows+1, 'ncols': N_cols})
